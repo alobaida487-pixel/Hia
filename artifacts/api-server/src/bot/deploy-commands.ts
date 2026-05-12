@@ -136,6 +136,37 @@ export const slashCommandsData = [
   new SlashCommandBuilder()
     .setName("unlockall")
     .setDescription("فتح جميع قنوات السيرفر دفعة واحدة"),
+
+  new SlashCommandBuilder()
+    .setName("giverole")
+    .setDescription("إعطاء رتبة لعضو")
+    .addUserOption((opt) =>
+      opt.setName("user").setDescription("العضو").setRequired(true)
+    )
+    .addRoleOption((opt) =>
+      opt.setName("role").setDescription("الرتبة").setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("removerole")
+    .setDescription("إزالة رتبة من عضو")
+    .addUserOption((opt) =>
+      opt.setName("user").setDescription("العضو").setRequired(true)
+    )
+    .addRoleOption((opt) =>
+      opt.setName("role").setDescription("الرتبة").setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("roleinfo")
+    .setDescription("عرض معلومات رتبة")
+    .addRoleOption((opt) =>
+      opt.setName("role").setDescription("الرتبة").setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("roles")
+    .setDescription("عرض قائمة جميع الرتب في السيرفر"),
 ];
 
 export async function registerSlashCommands(token: string, clientId: string) {

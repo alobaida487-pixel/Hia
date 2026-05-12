@@ -35,6 +35,10 @@ export async function handleMessage(message: Message) {
       case "unlock": await prefixUnlock(message, args, member); break;
       case "lockall": await prefixLockAll(message, member); break;
       case "unlockall": await prefixUnlockAll(message, member); break;
+      case "giverole":
+      case "addrole": await prefixGiveRole(message, args, member); break;
+      case "removerole":
+      case "delrole": await prefixRemoveRole(message, args, member); break;
     }
   } catch (err) {
     logger.error({ err, command }, "Error in prefix command");
@@ -236,6 +240,80 @@ async function prefixPurge(message: Message, args: string[], executor: GuildMemb
   const deleted = await channel.bulkDelete(amount, true);
   const reply = await channel.send(`✅ تم حذف ${deleted.size} رسالة.`);
   setTimeout(() => reply.delete().catch(() => {}), 3000);
+}
+
+async function prefixGiveRole(message: Message, args: string[], executor: GuildMember): Promise<void> {
+  if (!executor.permissions.has(PermissionFlagsBits.ManageRoles)) {
+    await getTextChannel(message).send("❌ ليس لديك صلاحية إدارة الرتب."); return;
+  }
+  const userId = args[0]?.replace(/[<@!>]/g, "");
+  const roleId = args[1]?.replace(/[<@&>]/g, "");
+
+  if (!userId || !roleId) {
+    await getTextChannel(message).send("❌ مثال: `?giverole @عضو @رتبة`"); return;
+  }
+
+  const target = message.guild!.members.cache.get(userId) ??
+    await message.guild!.members.fetch(userId).catch(() => null);
+  const role = message.guild!.roles.cache.get(roleId);
+
+  if (!target) { await getTextChannel(message).send("❌ العضو غير موجود."); return; }
+  if (!role) { await getTextChannel(message).send("❌ الرتبة غير موجودة."); return; }
+  if (executor.roles.highest.position <= role.position) {
+    await getTextChannel(message).send("❌ لا يمكنك إعطاء رتبة أعلى من رتبتك."); return;
+  }
+
+  await target.roles.add(role.id);
+
+  const embed = new EmbedBuilder()
+    .setTitle("✅ تم إعطاء الرتبة")
+    .addFields(
+      { name: "العضو", value: `${target}`, inline: true },
+      { name: "الرتبة", value: `<@&${role.id}>`, inline: true },
+      { name: "بواسطة", value: `${executor}`, inline: true }
+    )
+    .setColor(role.color || 0x5865f2)
+    .setTimestamp();
+
+  await getTextChannel(message).send({ embeds: [embed] });
+  await message.delete().catch(() => {});
+}
+
+async function prefixRemoveRole(message: Message, args: string[], executor: GuildMember): Promise<void> {
+  if (!executor.permissions.has(PermissionFlagsBits.ManageRoles)) {
+    await getTextChannel(message).send("❌ ليس لديك صلاحية إدارة الرتب."); return;
+  }
+  const userId = args[0]?.replace(/[<@!>]/g, "");
+  const roleId = args[1]?.replace(/[<@&>]/g, "");
+
+  if (!userId || !roleId) {
+    await getTextChannel(message).send("❌ مثال: `?removerole @عضو @رتبة`"); return;
+  }
+
+  const target = message.guild!.members.cache.get(userId) ??
+    await message.guild!.members.fetch(userId).catch(() => null);
+  const role = message.guild!.roles.cache.get(roleId);
+
+  if (!target) { await getTextChannel(message).send("❌ العضو غير موجود."); return; }
+  if (!role) { await getTextChannel(message).send("❌ الرتبة غير موجودة."); return; }
+  if (executor.roles.highest.position <= role.position) {
+    await getTextChannel(message).send("❌ لا يمكنك إزالة رتبة أعلى من رتبتك."); return;
+  }
+
+  await target.roles.remove(role.id);
+
+  const embed = new EmbedBuilder()
+    .setTitle("🗑️ تم إزالة الرتبة")
+    .addFields(
+      { name: "العضو", value: `${target}`, inline: true },
+      { name: "الرتبة", value: `<@&${role.id}>`, inline: true },
+      { name: "بواسطة", value: `${executor}`, inline: true }
+    )
+    .setColor(0xed4245)
+    .setTimestamp();
+
+  await getTextChannel(message).send({ embeds: [embed] });
+  await message.delete().catch(() => {});
 }
 
 async function prefixLock(message: Message, args: string[], executor: GuildMember): Promise<void> {

@@ -52,6 +52,10 @@ async function handleSlashCommand(interaction: ChatInputCommandInteraction) {
       case "unlock": await handleUnlock(interaction, guildMember); break;
       case "lockall": await handleLockAll(interaction, guildMember); break;
       case "unlockall": await handleUnlockAll(interaction, guildMember); break;
+      case "giverole": await handleGiveRole(interaction, guildMember); break;
+      case "removerole": await handleRemoveRole(interaction, guildMember); break;
+      case "roleinfo": await handleRoleInfo(interaction); break;
+      case "roles": await handleRoles(interaction); break;
       default:
         await interaction.reply({ content: "❌ أمر غير معروف.", ephemeral: true });
     }
@@ -488,6 +492,100 @@ async function handleUnlockAll(interaction: ChatInputCommandInteraction, executo
     .setColor(0x57f287).setTimestamp();
 
   await interaction.editReply({ embeds: [embed] });
+}
+
+async function handleGiveRole(interaction: ChatInputCommandInteraction, executor: GuildMember): Promise<void> {
+  if (!executor.permissions.has(PermissionFlagsBits.ManageRoles)) {
+    await interaction.reply({ content: "❌ ليس لديك صلاحية إدارة الرتب.", ephemeral: true }); return;
+  }
+  const target = interaction.options.getMember("user") as GuildMember | null;
+  const role = interaction.options.getRole("role");
+
+  if (!target) { await interaction.reply({ content: "❌ العضو غير موجود.", ephemeral: true }); return; }
+  if (!role) { await interaction.reply({ content: "❌ الرتبة غير موجودة.", ephemeral: true }); return; }
+  if (executor.roles.highest.position <= (role as any).position) {
+    await interaction.reply({ content: "❌ لا يمكنك إعطاء رتبة أعلى من رتبتك.", ephemeral: true }); return;
+  }
+
+  await target.roles.add(role.id);
+
+  const embed = new EmbedBuilder()
+    .setTitle("✅ تم إعطاء الرتبة")
+    .addFields(
+      { name: "العضو", value: `${target}`, inline: true },
+      { name: "الرتبة", value: `<@&${role.id}>`, inline: true },
+      { name: "بواسطة", value: `${executor}`, inline: true }
+    )
+    .setColor((role as any).color || 0x5865f2)
+    .setTimestamp();
+
+  await interaction.reply({ embeds: [embed] });
+}
+
+async function handleRemoveRole(interaction: ChatInputCommandInteraction, executor: GuildMember): Promise<void> {
+  if (!executor.permissions.has(PermissionFlagsBits.ManageRoles)) {
+    await interaction.reply({ content: "❌ ليس لديك صلاحية إدارة الرتب.", ephemeral: true }); return;
+  }
+  const target = interaction.options.getMember("user") as GuildMember | null;
+  const role = interaction.options.getRole("role");
+
+  if (!target) { await interaction.reply({ content: "❌ العضو غير موجود.", ephemeral: true }); return; }
+  if (!role) { await interaction.reply({ content: "❌ الرتبة غير موجودة.", ephemeral: true }); return; }
+  if (executor.roles.highest.position <= (role as any).position) {
+    await interaction.reply({ content: "❌ لا يمكنك إزالة رتبة أعلى من رتبتك.", ephemeral: true }); return;
+  }
+
+  await target.roles.remove(role.id);
+
+  const embed = new EmbedBuilder()
+    .setTitle("🗑️ تم إزالة الرتبة")
+    .addFields(
+      { name: "العضو", value: `${target}`, inline: true },
+      { name: "الرتبة", value: `<@&${role.id}>`, inline: true },
+      { name: "بواسطة", value: `${executor}`, inline: true }
+    )
+    .setColor(0xed4245)
+    .setTimestamp();
+
+  await interaction.reply({ embeds: [embed] });
+}
+
+async function handleRoleInfo(interaction: ChatInputCommandInteraction): Promise<void> {
+  const role = interaction.options.getRole("role", true);
+  const guildRole = interaction.guild!.roles.cache.get(role.id);
+  if (!guildRole) { await interaction.reply({ content: "❌ الرتبة غير موجودة.", ephemeral: true }); return; }
+
+  const embed = new EmbedBuilder()
+    .setTitle(`معلومات رتبة: ${guildRole.name}`)
+    .addFields(
+      { name: "🆔 ID", value: guildRole.id, inline: true },
+      { name: "🎨 اللون", value: guildRole.hexColor, inline: true },
+      { name: "👥 عدد الأعضاء", value: `${guildRole.members.size}`, inline: true },
+      { name: "📌 مثبّتة", value: guildRole.hoist ? "نعم" : "لا", inline: true },
+      { name: "🤖 بوت", value: guildRole.managed ? "نعم" : "لا", inline: true },
+      { name: "📅 تاريخ الإنشاء", value: `<t:${Math.floor(guildRole.createdTimestamp / 1000)}:R>`, inline: true }
+    )
+    .setColor(guildRole.color || 0x5865f2)
+    .setTimestamp();
+
+  await interaction.reply({ embeds: [embed] });
+}
+
+async function handleRoles(interaction: ChatInputCommandInteraction): Promise<void> {
+  const guild = interaction.guild!;
+  const roles = guild.roles.cache
+    .filter((r) => r.id !== guild.id)
+    .sort((a, b) => b.position - a.position)
+    .map((r) => `<@&${r.id}>`)
+    .join(", ");
+
+  const embed = new EmbedBuilder()
+    .setTitle(`🎭 رتب السيرفر (${guild.roles.cache.size - 1})`)
+    .setDescription(roles.length > 4096 ? roles.slice(0, 4093) + "..." : roles || "لا توجد رتب")
+    .setColor(0x5865f2)
+    .setTimestamp();
+
+  await interaction.reply({ embeds: [embed] });
 }
 
 async function handleButton(interaction: ButtonInteraction) {
