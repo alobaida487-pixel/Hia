@@ -1,0 +1,47 @@
+import {
+  Client,
+  GatewayIntentBits,
+  Partials,
+  Collection,
+} from "discord.js";
+import { logger } from "../lib/logger";
+import { registerEvents } from "./events";
+import { registerSlashCommands } from "./deploy-commands";
+
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.DirectMessages,
+    GatewayIntentBits.GuildModeration,
+  ],
+  partials: [Partials.Channel, Partials.Message],
+});
+
+(client as any).slashCommands = new Collection();
+
+registerEvents(client);
+
+const token = process.env["DISCORD_BOT_TOKEN"];
+const clientId = process.env["DISCORD_CLIENT_ID"];
+
+if (!token) {
+  logger.error("DISCORD_BOT_TOKEN is not set");
+  process.exit(1);
+}
+
+async function start() {
+  await client.login(token as string);
+
+  const resolvedClientId = clientId ?? client.user!.id;
+  await registerSlashCommands(token as string, resolvedClientId);
+}
+
+start().catch((err) => {
+  logger.error({ err }, "Failed to start Discord bot");
+  process.exit(1);
+});
+
+export default client;
