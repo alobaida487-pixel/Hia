@@ -33,15 +33,15 @@ if (!token) {
 }
 
 async function start() {
-  await client.login(token as string);
-
-  const resolvedClientId = clientId ?? client.user!.id;
-  await registerSlashCommands(token as string, resolvedClientId);
+  try {
+    await client.login(token as string);
+    const resolvedClientId = clientId ?? client.user!.id;
+    await registerSlashCommands(token as string, resolvedClientId);
+  } catch (err) {
+    logger.error({ err }, "Failed to start Discord bot — server will continue running");
+  }
 }
 
-start().catch((err) => {
-  logger.error({ err }, "Failed to start Discord bot");
-  process.exit(1);
-});
+start();
 
 export default client;
