@@ -111,6 +111,31 @@ export const slashCommandsData = [
   new SlashCommandBuilder()
     .setName("serverinfo")
     .setDescription("عرض معلومات السيرفر"),
+
+  new SlashCommandBuilder()
+    .setName("lock")
+    .setDescription("قفل القناة — يمنع الأعضاء من الكتابة")
+    .addChannelOption((opt) =>
+      opt.setName("channel").setDescription("القناة (الحالية افتراضياً)").setRequired(false)
+    )
+    .addStringOption((opt) =>
+      opt.setName("reason").setDescription("السبب").setRequired(false)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("unlock")
+    .setDescription("فتح القناة — يسمح للأعضاء بالكتابة مجدداً")
+    .addChannelOption((opt) =>
+      opt.setName("channel").setDescription("القناة (الحالية افتراضياً)").setRequired(false)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("lockall")
+    .setDescription("قفل جميع قنوات السيرفر دفعة واحدة"),
+
+  new SlashCommandBuilder()
+    .setName("unlockall")
+    .setDescription("فتح جميع قنوات السيرفر دفعة واحدة"),
 ];
 
 export async function registerSlashCommands(token: string, clientId: string) {

@@ -31,6 +31,10 @@ export async function handleMessage(message: Message) {
       case "purge":
       case "clear": await prefixPurge(message, args, member); break;
       case "help": await prefixHelp(message); break;
+      case "lock": await prefixLock(message, args, member); break;
+      case "unlock": await prefixUnlock(message, args, member); break;
+      case "lockall": await prefixLockAll(message, member); break;
+      case "unlockall": await prefixUnlockAll(message, member); break;
     }
   } catch (err) {
     logger.error({ err, command }, "Error in prefix command");
@@ -232,6 +236,96 @@ async function prefixPurge(message: Message, args: string[], executor: GuildMemb
   const deleted = await channel.bulkDelete(amount, true);
   const reply = await channel.send(`✅ تم حذف ${deleted.size} رسالة.`);
   setTimeout(() => reply.delete().catch(() => {}), 3000);
+}
+
+async function prefixLock(message: Message, args: string[], executor: GuildMember): Promise<void> {
+  if (!executor.permissions.has(PermissionFlagsBits.ManageChannels)) {
+    await getTextChannel(message).send("❌ ليس لديك صلاحية قفل القنوات."); return;
+  }
+  const channel = message.channel as TextChannel;
+  const reason = args.join(" ") || "لم يُذكر سبب";
+
+  await channel.permissionOverwrites.edit(message.guild!.id, { SendMessages: false });
+
+  const embed = new EmbedBuilder()
+    .setTitle("🔒 تم قفل القناة")
+    .addFields(
+      { name: "القناة", value: `${channel}`, inline: true },
+      { name: "بواسطة", value: `${executor}`, inline: true },
+      { name: "السبب", value: reason }
+    )
+    .setColor(0xed4245).setTimestamp();
+
+  await channel.send({ embeds: [embed] });
+  await message.delete().catch(() => {});
+}
+
+async function prefixUnlock(message: Message, args: string[], executor: GuildMember): Promise<void> {
+  if (!executor.permissions.has(PermissionFlagsBits.ManageChannels)) {
+    await getTextChannel(message).send("❌ ليس لديك صلاحية فتح القنوات."); return;
+  }
+  const channel = message.channel as TextChannel;
+
+  await channel.permissionOverwrites.edit(message.guild!.id, { SendMessages: null });
+
+  const embed = new EmbedBuilder()
+    .setTitle("🔓 تم فتح القناة")
+    .addFields(
+      { name: "القناة", value: `${channel}`, inline: true },
+      { name: "بواسطة", value: `${executor}`, inline: true }
+    )
+    .setColor(0x57f287).setTimestamp();
+
+  await channel.send({ embeds: [embed] });
+  await message.delete().catch(() => {});
+}
+
+async function prefixLockAll(message: Message, executor: GuildMember): Promise<void> {
+  if (!executor.permissions.has(PermissionFlagsBits.Administrator)) {
+    await getTextChannel(message).send("❌ هذا الأمر يتطلب صلاحية المدير."); return;
+  }
+  const guild = message.guild!;
+  const textChannels = guild.channels.cache.filter(
+    (c) => c.type === 0
+  ) as Map<string, TextChannel>;
+
+  await Promise.allSettled(
+    [...textChannels.values()].map((ch) =>
+      ch.permissionOverwrites.edit(guild.id, { SendMessages: false }).catch(() => {})
+    )
+  );
+
+  const embed = new EmbedBuilder()
+    .setTitle("🔒 تم قفل جميع القنوات")
+    .setDescription(`قفل **${textChannels.size}** قناة بواسطة ${executor}`)
+    .setColor(0xed4245).setTimestamp();
+
+  await getTextChannel(message).send({ embeds: [embed] });
+  await message.delete().catch(() => {});
+}
+
+async function prefixUnlockAll(message: Message, executor: GuildMember): Promise<void> {
+  if (!executor.permissions.has(PermissionFlagsBits.Administrator)) {
+    await getTextChannel(message).send("❌ هذا الأمر يتطلب صلاحية المدير."); return;
+  }
+  const guild = message.guild!;
+  const textChannels = guild.channels.cache.filter(
+    (c) => c.type === 0
+  ) as Map<string, TextChannel>;
+
+  await Promise.allSettled(
+    [...textChannels.values()].map((ch) =>
+      ch.permissionOverwrites.edit(guild.id, { SendMessages: null }).catch(() => {})
+    )
+  );
+
+  const embed = new EmbedBuilder()
+    .setTitle("🔓 تم فتح جميع القنوات")
+    .setDescription(`فتح **${textChannels.size}** قناة بواسطة ${executor}`)
+    .setColor(0x57f287).setTimestamp();
+
+  await getTextChannel(message).send({ embeds: [embed] });
+  await message.delete().catch(() => {});
 }
 
 async function prefixHelp(message: Message): Promise<void> {

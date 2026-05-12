@@ -48,6 +48,10 @@ async function handleSlashCommand(interaction: ChatInputCommandInteraction) {
       case "ticketpanel": await handleTicketPanel(interaction, guildMember); break;
       case "userinfo": await handleUserInfo(interaction); break;
       case "serverinfo": await handleServerInfo(interaction); break;
+      case "lock": await handleLock(interaction, guildMember); break;
+      case "unlock": await handleUnlock(interaction, guildMember); break;
+      case "lockall": await handleLockAll(interaction, guildMember); break;
+      case "unlockall": await handleUnlockAll(interaction, guildMember); break;
       default:
         await interaction.reply({ content: "❌ أمر غير معروف.", ephemeral: true });
     }
@@ -394,6 +398,96 @@ async function handleServerInfo(interaction: ChatInputCommandInteraction): Promi
     .setColor(0x5865f2).setTimestamp();
 
   await interaction.reply({ embeds: [embed] });
+}
+
+async function handleLock(interaction: ChatInputCommandInteraction, executor: GuildMember): Promise<void> {
+  if (!executor.permissions.has(PermissionFlagsBits.ManageChannels)) {
+    await interaction.reply({ content: "❌ ليس لديك صلاحية قفل القنوات.", ephemeral: true }); return;
+  }
+  const target = (interaction.options.getChannel("channel") ?? interaction.channel) as TextChannel;
+  const reason = interaction.options.getString("reason") ?? "لم يُذكر سبب";
+
+  await target.permissionOverwrites.edit(interaction.guild!.id, { SendMessages: false });
+
+  const embed = new EmbedBuilder()
+    .setTitle("🔒 تم قفل القناة")
+    .addFields(
+      { name: "القناة", value: `${target}`, inline: true },
+      { name: "بواسطة", value: `${executor}`, inline: true },
+      { name: "السبب", value: reason }
+    )
+    .setColor(0xed4245).setTimestamp();
+
+  await interaction.reply({ embeds: [embed] });
+}
+
+async function handleUnlock(interaction: ChatInputCommandInteraction, executor: GuildMember): Promise<void> {
+  if (!executor.permissions.has(PermissionFlagsBits.ManageChannels)) {
+    await interaction.reply({ content: "❌ ليس لديك صلاحية فتح القنوات.", ephemeral: true }); return;
+  }
+  const target = (interaction.options.getChannel("channel") ?? interaction.channel) as TextChannel;
+
+  await target.permissionOverwrites.edit(interaction.guild!.id, { SendMessages: null });
+
+  const embed = new EmbedBuilder()
+    .setTitle("🔓 تم فتح القناة")
+    .addFields(
+      { name: "القناة", value: `${target}`, inline: true },
+      { name: "بواسطة", value: `${executor}`, inline: true }
+    )
+    .setColor(0x57f287).setTimestamp();
+
+  await interaction.reply({ embeds: [embed] });
+}
+
+async function handleLockAll(interaction: ChatInputCommandInteraction, executor: GuildMember): Promise<void> {
+  if (!executor.permissions.has(PermissionFlagsBits.Administrator)) {
+    await interaction.reply({ content: "❌ هذا الأمر يتطلب صلاحية المدير.", ephemeral: true }); return;
+  }
+
+  await interaction.deferReply();
+  const guild = interaction.guild!;
+  const textChannels = guild.channels.cache.filter(
+    (c) => c.type === ChannelType.GuildText
+  ) as Map<string, TextChannel>;
+
+  await Promise.allSettled(
+    [...textChannels.values()].map((ch) =>
+      ch.permissionOverwrites.edit(guild.id, { SendMessages: false }).catch(() => {})
+    )
+  );
+
+  const embed = new EmbedBuilder()
+    .setTitle("🔒 تم قفل جميع القنوات")
+    .setDescription(`قفل **${textChannels.size}** قناة بواسطة ${executor}`)
+    .setColor(0xed4245).setTimestamp();
+
+  await interaction.editReply({ embeds: [embed] });
+}
+
+async function handleUnlockAll(interaction: ChatInputCommandInteraction, executor: GuildMember): Promise<void> {
+  if (!executor.permissions.has(PermissionFlagsBits.Administrator)) {
+    await interaction.reply({ content: "❌ هذا الأمر يتطلب صلاحية المدير.", ephemeral: true }); return;
+  }
+
+  await interaction.deferReply();
+  const guild = interaction.guild!;
+  const textChannels = guild.channels.cache.filter(
+    (c) => c.type === ChannelType.GuildText
+  ) as Map<string, TextChannel>;
+
+  await Promise.allSettled(
+    [...textChannels.values()].map((ch) =>
+      ch.permissionOverwrites.edit(guild.id, { SendMessages: null }).catch(() => {})
+    )
+  );
+
+  const embed = new EmbedBuilder()
+    .setTitle("🔓 تم فتح جميع القنوات")
+    .setDescription(`فتح **${textChannels.size}** قناة بواسطة ${executor}`)
+    .setColor(0x57f287).setTimestamp();
+
+  await interaction.editReply({ embeds: [embed] });
 }
 
 async function handleButton(interaction: ButtonInteraction) {
