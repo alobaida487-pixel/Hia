@@ -6,6 +6,7 @@ import {
   TextChannel,
 } from "discord.js";
 import { logger } from "../../lib/logger";
+import { setAdminRole, getAdminRole, buildTicketSelectMenu } from "../tickets";
 
 const PREFIX = "?";
 
@@ -39,6 +40,8 @@ export async function handleMessage(message: Message) {
       case "addrole": await prefixGiveRole(message, args, member); break;
       case "removerole":
       case "delrole": await prefixRemoveRole(message, args, member); break;
+      case "ticketsetup": await prefixTicketSetup(message, args, member); break;
+      case "ticketpanel": await prefixTicketPanel(message, member); break;
     }
   } catch (err) {
     logger.error({ err, command }, "Error in prefix command");
@@ -403,6 +406,44 @@ async function prefixUnlockAll(message: Message, executor: GuildMember): Promise
     .setColor(0x57f287).setTimestamp();
 
   await getTextChannel(message).send({ embeds: [embed] });
+  await message.delete().catch(() => {});
+}
+
+async function prefixTicketSetup(message: Message, args: string[], executor: GuildMember): Promise<void> {
+  if (!executor.permissions.has(PermissionFlagsBits.Administrator)) {
+    await getTextChannel(message).send("❌ هذا الأمر يتطلب صلاحية المدير."); return;
+  }
+  const roleId = args[0]?.replace(/[<@&>]/g, "");
+  if (!roleId) {
+    await getTextChannel(message).send("❌ مثال: `?ticketsetup @رتبة-الإدارة`"); return;
+  }
+  const role = message.guild!.roles.cache.get(roleId);
+  if (!role) {
+    await getTextChannel(message).send("❌ الرتبة غير موجودة."); return;
+  }
+  setAdminRole(message.guild!.id, role.id);
+  const embed = new EmbedBuilder()
+    .setTitle("✅ تم ضبط رتبة الإدارة")
+    .setDescription(`رتبة الإدارة للتذاكر: <@&${role.id}>`)
+    .setColor(0x57f287).setTimestamp();
+  await getTextChannel(message).send({ embeds: [embed] });
+  await message.delete().catch(() => {});
+}
+
+async function prefixTicketPanel(message: Message, executor: GuildMember): Promise<void> {
+  if (!executor.permissions.has(PermissionFlagsBits.ManageChannels)) {
+    await getTextChannel(message).send("❌ ليس لديك صلاحية."); return;
+  }
+  const adminRoleId = getAdminRole(message.guild!.id);
+  const embed = new EmbedBuilder()
+    .setTitle("🎫 نظام التذاكر")
+    .setDescription(
+      "**قم باختيار نوع البوت لعرض التفاصيل**\n\nاختر من القائمة أدناه لفتح تذكرة دعم وسيتواصل معك فريق الإدارة في أقرب وقت." +
+      (adminRoleId ? `\n\n> رتبة الإدارة: <@&${adminRoleId}>` : "")
+    )
+    .setColor(0x5865f2).setTimestamp();
+  const selectRow = buildTicketSelectMenu();
+  await getTextChannel(message).send({ embeds: [embed], components: [selectRow] });
   await message.delete().catch(() => {});
 }
 

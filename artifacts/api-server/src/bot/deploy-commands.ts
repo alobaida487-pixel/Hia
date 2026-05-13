@@ -167,6 +167,13 @@ export const slashCommandsData = [
   new SlashCommandBuilder()
     .setName("roles")
     .setDescription("عرض قائمة جميع الرتب في السيرفر"),
+
+  new SlashCommandBuilder()
+    .setName("ticketsetup")
+    .setDescription("تعيين رتبة الإدارة لنظام التذاكر")
+    .addRoleOption((opt) =>
+      opt.setName("role").setDescription("رتبة الإدارة").setRequired(true)
+    ),
 ];
 
 export async function registerSlashCommands(token: string, clientId: string) {
