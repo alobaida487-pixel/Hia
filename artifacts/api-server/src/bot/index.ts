@@ -44,7 +44,11 @@ async function login(attempt = 1): Promise<void> {
       await registerSlashCommands(token as string, resolvedClientId);
       commandsRegistered = true;
     }
-  } catch (err) {
+  } catch (err: any) {
+    if (err?.code === "TokenInvalid") {
+      logger.error("Invalid Discord token — bot will not start. Set a valid DISCORD_BOT_TOKEN.");
+      return;
+    }
     const delay = Math.min(5000 * attempt, 60000);
     logger.error({ err, attempt }, `Failed to connect — retrying in ${delay / 1000}s`);
     setTimeout(() => login(attempt + 1), delay);
