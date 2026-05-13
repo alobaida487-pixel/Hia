@@ -32,16 +32,43 @@ if (!token) {
   process.exit(1);
 }
 
-async function start() {
+let commandsRegistered = false;
+
+async function login(attempt = 1): Promise<void> {
   try {
     await client.login(token as string);
-    const resolvedClientId = clientId ?? client.user!.id;
-    await registerSlashCommands(token as string, resolvedClientId);
+    logger.info("Discord bot connected successfully");
+
+    if (!commandsRegistered) {
+      const resolvedClientId = clientId ?? client.user!.id;
+      await registerSlashCommands(token as string, resolvedClientId);
+      commandsRegistered = true;
+    }
   } catch (err) {
-    logger.error({ err }, "Failed to start Discord bot — server will continue running");
+    const delay = Math.min(5000 * attempt, 60000);
+    logger.error({ err, attempt }, `Failed to connect — retrying in ${delay / 1000}s`);
+    setTimeout(() => login(attempt + 1), delay);
   }
 }
 
-start();
+client.on("shardDisconnect", (event, shardId) => {
+  logger.warn({ code: event.code, shardId }, "Discord shard disconnected — will auto-reconnect");
+});
+
+client.on("shardError", (error, shardId) => {
+  logger.error({ error, shardId }, "Discord shard error");
+});
+
+client.on("invalidated", () => {
+  logger.warn("Discord session invalidated — re-logging in...");
+  commandsRegistered = false;
+  setTimeout(() => login(), 3000);
+});
+
+client.on("error", (error) => {
+  logger.error({ error }, "Discord client error");
+});
+
+login();
 
 export default client;
